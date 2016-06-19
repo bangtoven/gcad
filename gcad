@@ -1,0 +1,87 @@
+#!/bin/bash
+
+if [[ $# -eq 0 ]] ; then
+    echo 'no argument'
+    exit 1
+fi
+
+ORIG=$(date -j -f '%Y-%m-%d %T' "2016-06-17 00:00:00" "+%s")
+BASE=$(date -j -f '%Y-%m-%d %T' "2016-06-25 00:00:00" "+%s")
+FACTOR=5/3
+
+while [[ $# -gt 0 ]] 
+do
+key="$1"
+case $key in
+    -n)
+	NOW=YES
+    ;;
+    -l)
+	LAST=YES
+    ;;
+    -s)
+	SHA="$2"
+    shift # past argument
+    ;;
+    -d)
+	DIFF="$2"
+	shift
+	;;
+    --commit)
+    COMMIT=YES
+    ;;
+    *)
+            # unknown option
+    ;;
+esac
+shift # past argument or value
+done
+
+new_date () {
+	if [ ! -z $DIFF ] ; then
+		NEW=$(( $1+($DIFF*3600) ))
+	else
+		NEW=$(( ($1-ORIG)*$FACTOR + BASE ))
+	fi
+	date -j -f "%s" "${NEW}" "+%Y-%m-%d %T %z"
+}
+
+if [ ! -z $SHA ] ; then
+	LAST_HASH=$(git log --format=%H -n 1)
+	if [ $SHA = $LAST_HASH ] ; then
+		LAST=YES
+	fi
+fi
+
+if [ $NOW ] ; then
+	NOW=$(date -j "+%s")
+	NEW_DATE=$(new_date ${NOW})
+	echo ${NEW_DATE}
+elif [ $LAST ] ; then
+	COMMIT_LOG=$(git log --pretty=format:'%ci' -n 1)
+	DATE=$(date -j -f "%Y-%m-%d %T %z" "${COMMIT_LOG}" "+%s")
+	NEW_DATE=$(new_date ${DATE})
+	
+	if [ $COMMIT ] ; then
+		GIT_COMMITTER_DATE="${NEW_DATE}" git commit --amend --date "${NEW_DATE}" --no-edit
+	else
+		echo ${COMMIT_LOG}
+		echo "->"
+		echo ${NEW_DATE}
+	fi
+elif [ ! -z $SHA ] ; then
+	DATE=$(git show -s --format=%ct ${SHA})
+	NEW_DATE=$(new_date ${DATE})
+
+	if [ $COMMIT ] ; then
+		git filter-branch -f --env-filter "
+		if [ \$GIT_COMMIT = ${SHA} ] ; then
+        	export GIT_AUTHOR_DATE='${NEW_DATE}'
+        	export GIT_COMMITTER_DATE='${NEW_DATE}'
+		fi "
+	else
+		echo $(git show -s --format=%ci ${SHA})
+		echo "->"
+		echo ${NEW_DATE}
+	fi
+fi
